@@ -4,7 +4,9 @@ Each message type inherits either from the BaseChatMessage class or BaseAgentEve
 class and includes specific fields relevant to the type of message being sent.
 """
 
+import uuid
 from abc import ABC, abstractmethod
+from datetime import datetime, timezone
 from typing import Any, Dict, Generic, List, Literal, Mapping, Optional, Type, TypeVar
 
 from autogen_core import Component, ComponentBase, FunctionCall, Image
@@ -76,6 +78,9 @@ class BaseChatMessage(BaseMessage, ABC):
     message using models and return a response as another :class:`BaseChatMessage`.
     """
 
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    """Unique identifier for this message."""
+
     source: str
     """The name of the agent that sent this message."""
 
@@ -84,6 +89,9 @@ class BaseChatMessage(BaseMessage, ABC):
 
     metadata: Dict[str, str] = {}
     """Additional metadata about the message."""
+
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    """The time when the message was created."""
 
     @abstractmethod
     def to_model_text(self) -> str:
@@ -145,6 +153,9 @@ class BaseAgentEvent(BaseMessage, ABC):
     a custom rendering of the content.
     """
 
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    """Unique identifier for this event."""
+
     source: str
     """The name of the agent that sent this message."""
 
@@ -153,6 +164,9 @@ class BaseAgentEvent(BaseMessage, ABC):
 
     metadata: Dict[str, str] = {}
     """Additional metadata about the message."""
+
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    """The time when the message was created."""
 
 
 StructuredContentType = TypeVar("StructuredContentType", bound=BaseModel, covariant=True)
@@ -419,6 +433,12 @@ class ToolCallSummaryMessage(BaseTextChatMessage):
 
     type: Literal["ToolCallSummaryMessage"] = "ToolCallSummaryMessage"
 
+    tool_calls: List[FunctionCall]
+    """The tool calls that were made."""
+
+    results: List[FunctionExecutionResult]
+    """The results of the tool calls."""
+
 
 class ToolCallRequestEvent(BaseAgentEvent):
     """An event signaling a request to use tools."""
@@ -433,22 +453,33 @@ class ToolCallRequestEvent(BaseAgentEvent):
 
 
 class CodeGenerationEvent(BaseAgentEvent):
-    """An event signaling code generation for execution."""
+    """An event signaling code generation event."""
+
+    retry_attempt: int
+    "Retry number, 0 means first generation"
 
     content: str
     "The complete content as string."
 
-    type: Literal["CodeGenerationEvent"] = "CodeGenerationEvent"
-
     code_blocks: List[CodeBlock]
+    "List of code blocks present in content"
+
+    type: Literal["CodeGenerationEvent"] = "CodeGenerationEvent"
 
     def to_text(self) -> str:
         return self.content
 
 
 class CodeExecutionEvent(BaseAgentEvent):
-    type: Literal["CodeExecutionEvent"] = "CodeExecutionEvent"
+    """An event signaling code execution event."""
+
+    retry_attempt: int
+    "Retry number, 0 means first execution"
+
     result: CodeResult
+    "Code Execution Result"
+
+    type: Literal["CodeExecutionEvent"] = "CodeExecutionEvent"
 
     def to_text(self) -> str:
         return self.result.output
@@ -499,6 +530,10 @@ class ModelClientStreamingChunkEvent(BaseAgentEvent):
     content: str
     """A string chunk from the model client."""
 
+    full_message_id: str | None = None
+    """Optional reference to the complete message that may come after the chunks.
+    This allows consumers of the stream to correlate chunks with the eventual completed message."""
+
     type: Literal["ModelClientStreamingChunkEvent"] = "ModelClientStreamingChunkEvent"
 
     def to_text(self) -> str:
@@ -526,6 +561,18 @@ class SelectSpeakerEvent(BaseAgentEvent):
     """The names of the selected speakers."""
 
     type: Literal["SelectSpeakerEvent"] = "SelectSpeakerEvent"
+
+    def to_text(self) -> str:
+        return str(self.content)
+
+
+class SelectorEvent(BaseAgentEvent):
+    """An event emitted from the `SelectorGroupChat`."""
+
+    content: str
+    """The content of the event."""
+
+    type: Literal["SelectorEvent"] = "SelectorEvent"
 
     def to_text(self) -> str:
         return str(self.content)
